@@ -24,26 +24,16 @@ async function transcribeAudio(audioBuffer) {
 
 async function addCalendarEvent(title, dateStr, timeStr) {
   const date = new Date();
-  
-  // Parse date
-  if (dateStr && (dateStr.includes('mañana') || dateStr.includes('tomorrow'))) {
+  if (dateStr.includes('mañana') || dateStr.includes('tomorrow')) {
     date.setDate(date.getDate() + 1);
-  } else if (dateStr && dateStr.includes('pasado')) {
+  } else if (dateStr.includes('pasado')) {
     date.setDate(date.getDate() + 2);
   }
   
-  // Parse time - handle "11 A.M.", "11am", "11 pm", etc.
-  let hour = 10;
-  if (timeStr) {
-    const cleanTime = timeStr.replace(/\s+/g, '').toLowerCase();
-    const hourMatch = cleanTime.match(/(\d{1,2})/);
-    if (hourMatch) {
-      hour = parseInt(hourMatch[1]);
-      // Add 12 for PM times
-      if (cleanTime.includes('p') && hour < 12) {
-        hour += 12;
-      }
-    }
+  const timeParts = timeStr.match(/(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)?/i);
+  let hour = timeParts ? parseInt(timeParts[1]) : 10;
+  if (timeParts && timeParts[2] && (timeParts[2].toLowerCase().includes('p'))) {
+    hour += 12;
   }
 
   const dateString = date.toISOString().split('T')[0];
@@ -65,7 +55,6 @@ async function addCalendarEvent(title, dateStr, timeStr) {
     });
     return true;
   } catch (e) {
-    console.error('Calendar API error:', e);
     return false;
   }
 }
