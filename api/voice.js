@@ -1,71 +1,37 @@
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { Readable } from 'stream';
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
-const GOOGLE_TOKEN = process.env.GOOGLE_CALENDAR_TOKEN;
 
-async function transcribeAudio(audioBuffer) {
-  const form = new FormData();
-  form.append('file', Readable.from(audioBuffer), 'audio.ogg');
-  form.append('model', 'whisper-1');
-
-  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-    body: form,
-  });
-
-  const { text } = await res.json();
-  return text;
-}
-
-async function addCalendarEvent(title, dateStr, timeStr) {
-  const date = new Date();
-  if (dateStr.includes('mañana') || dateStr.includes('tomorrow')) {
-    date.setDate(date.getDate() + 1);
-  } else if (dateStr.includes('pasado')) {
-    date.setDate(date.getDate() + 2);
-  }
-  
-  const timeParts = timeStr.match(/(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)?/i);
-  let hour = timeParts ? parseInt(timeParts[1]) : 10;
-  if (timeParts && timeParts[2] && (timeParts[2].toLowerCase().includes('p'))) {
-    hour += 12;
-  }
-
-  const dateString = date.toISOString().split('T')[0];
-  const startTime = `${dateString}T${String(hour).padStart(2, '0')}:00:00`;
-  const endTime = `${dateString}T${String(hour + 1).padStart(2, '0')}:00:00`;
+async function executeVoiceNative(audioBuffer) {
+  // Save audio to temp file
+  const tmpFile = `/tmp/voice_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.ogg`;
+  fs.writeFileSync(tmpFile, audioBuffer);
 
   try {
-    await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${GOOGLE_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        summary: title,
-        start: { dateTime: startTime, timeZone: 'America/Hermosillo' },
-        end: { dateTime: endTime, timeZone: 'America/Hermosillo' },
-      }),
+    // Call voice-native skill (fire and forget)
+    const skillPath = '/Users/mac/.openclaw/workspace/skills/voice-native/scripts/transcribe-and-execute.js';
+    execSync(`OPENAI_API_KEY="${OPENAI_API_KEY}" node "${skillPath}" "${tmpFile}"`, {
+      stdio: 'ignore',
+      timeout: 30000,
     });
-    return true;
   } catch (e) {
-    return false;
+    // Skill handles errors silently
+  } finally {
+    // Cleanup
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {}
   }
-}
-
-async function sendTelegram(text) {
-  const url = `https://api.telegram.org/bot${TOKEN}/sendMessage`;
-  await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: CHAT_ID, text }),
-  });
 }
 
 export default async function handler(req, res) {
@@ -80,7 +46,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // Respond immediately (no await) to avoid long responses
+    // Respond immediately (no await)
     res.status(200).json({ ok: true });
 
     // Process in background (fire and forget)
@@ -97,42 +63,10 @@ export default async function handler(req, res) {
         const audioRes = await fetch(downloadUrl);
         const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
 
-        // Transcribe (this is the ONLY cost: ~$0.003)
-        const text = await transcribeAudio(audioBuffer);
-        const lowerText = text.toLowerCase();
-
-        // Execute silently (no response sent)
-        if (lowerText.includes('agéndame') || lowerText.includes('agendame')) {
-          const titleMatch = text.match(/(?:agéndame|agendame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
-          const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
-          const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
-          
-          if (titleMatch && dateMatch) {
-            const title = titleMatch[1].trim();
-            const dateStr = dateMatch[0];
-            const timeStr = timeMatch ? timeMatch[1] : '10:00';
-            
-            await addCalendarEvent(title, dateStr, timeStr);
-            // Silent success
-          }
-          
-        } else if (lowerText.includes('recuérdame') || lowerText.includes('recuerdame')) {
-          const titleMatch = text.match(/(?:recuérdame|recuerdame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
-          const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
-          const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
-          
-          if (titleMatch && dateMatch) {
-            const title = `📌 ${titleMatch[1].trim()}`;
-            const dateStr = dateMatch[0];
-            const timeStr = timeMatch ? timeMatch[1] : '09:00';
-            
-            await addCalendarEvent(title, dateStr, timeStr);
-            // Silent success
-          }
-        }
+        // Execute via voice-native skill
+        await executeVoiceNative(audioBuffer);
       } catch (e) {
-        console.error('Background error:', e);
-        // Fail silently
+        // Silent failure
       }
     })();
   } catch (e) {
