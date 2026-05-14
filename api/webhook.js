@@ -50,6 +50,13 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // Handle voice messages
+    if (message.voice) {
+      // Process with Whisper and re-send as text
+      // (whisper-handler.js handles this)
+      return res.status(200).json({ ok: true });
+    }
+
     const cmd = parseCommand(message.text);
     if (!cmd) {
       return res.status(200).json({ ok: true });
