@@ -1,0 +1,13 @@
+{
+  "name": "karen-calendar-webhook",
+  "version": "1.0.0",
+  "description": "Zero-cost calendar commands via Telegram webhook",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node api/webhook.js",
+    "build": "echo 'Build complete'"
+  },
+  "dependencies": {
+    "googleapis": "^118.0.0"
+  }
+}
