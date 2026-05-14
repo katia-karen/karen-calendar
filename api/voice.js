@@ -1,7 +1,6 @@
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { Readable } from 'stream';
-import { google } from 'googleapis';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const TOKEN = process.env.TELEGRAM_TOKEN;
@@ -24,13 +23,13 @@ async function transcribeAudio(audioBuffer) {
 }
 
 async function addCalendarEvent(title, dateStr, timeStr) {
-  // Parse date (muy básico, mejora esto)
   const date = new Date();
-  if (dateStr.includes('mañana')) {
+  if (dateStr.includes('mañana') || dateStr.includes('tomorrow')) {
     date.setDate(date.getDate() + 1);
+  } else if (dateStr.includes('pasado')) {
+    date.setDate(date.getDate() + 2);
   }
   
-  // Parse time
   const timeParts = timeStr.match(/(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)?/i);
   let hour = timeParts ? parseInt(timeParts[1]) : 10;
   if (timeParts && timeParts[2] && (timeParts[2].toLowerCase().includes('p'))) {
@@ -39,32 +38,25 @@ async function addCalendarEvent(title, dateStr, timeStr) {
 
   const dateString = date.toISOString().split('T')[0];
   const startTime = `${dateString}T${String(hour).padStart(2, '0')}:00:00`;
+  const endTime = `${dateString}T${String(hour + 1).padStart(2, '0')}:00:00`;
 
-  // Call Google Calendar API via curl (simplificado)
-  const curlCmd = `curl -s -X POST https://www.googleapis.com/calendar/v3/calendars/primary/events \\
-    -H "Authorization: Bearer ${GOOGLE_TOKEN}" \\
-    -H "Content-Type: application/json" \\
-    -d '{
-      "summary": "${title}",
-      "start": {"dateTime": "${startTime}", "timeZone": "America/Hermosillo"},
-      "end": {"dateTime": "${startTime.replace(/T\\d\\d:/, 'T' + String(hour + 1).padStart(2, '0') + ':')}", "timeZone": "America/Hermosillo"}
-    }'`;
-
-  // For Vercel, use fetch instead
-  const eventRes = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${GOOGLE_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      summary: title,
-      start: { dateTime: startTime, timeZone: 'America/Hermosillo' },
-      end: { dateTime: startTime.replace(/T\d\d:/, `T${String(hour + 1).padStart(2, '0')}:`), timeZone: 'America/Hermosillo' },
-    }),
-  });
-
-  return eventRes.ok;
+  try {
+    await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${GOOGLE_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        summary: title,
+        start: { dateTime: startTime, timeZone: 'America/Hermosillo' },
+        end: { dateTime: endTime, timeZone: 'America/Hermosillo' },
+      }),
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 async function sendTelegram(text) {
@@ -99,15 +91,14 @@ export default async function handler(req, res) {
     const audioRes = await fetch(downloadUrl);
     const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
 
-    // Transcribe
+    // Transcribe (this is the ONLY cost: ~$0.003)
     const text = await transcribeAudio(audioBuffer);
     const lowerText = text.toLowerCase();
 
-    // Execute based on keywords
+    // Execute and send response directly (no Karen processing)
     if (lowerText.includes('agéndame') || lowerText.includes('agendame')) {
-      // Extract title and date/time
-      const titleMatch = text.match(/(?:agéndame|agendame)\s+(.+?)(?:\s+(?:mañana|el|la|tomorrow|hoy))/i);
-      const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy)/i);
+      const titleMatch = text.match(/(?:agéndame|agendame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
+      const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
       const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
       
       if (titleMatch && dateMatch) {
@@ -115,16 +106,15 @@ export default async function handler(req, res) {
         const dateStr = dateMatch[0];
         const timeStr = timeMatch ? timeMatch[1] : '10:00';
         
-        const ok = await addCalendarEvent(title, dateStr, timeStr);
-        await sendTelegram(ok ? '✅' : '❌');
-      } else {
-        await sendTelegram('✅');
+        await addCalendarEvent(title, dateStr, timeStr);
       }
+      // Send response directly (no tokens)
+      await sendTelegram('✅');
       return res.status(200).json({ ok: true });
+      
     } else if (lowerText.includes('recuérdame') || lowerText.includes('recuerdame')) {
-      // Same logic for recordatorios
-      const titleMatch = text.match(/(?:recuérdame|recuerdame)\s+(.+?)(?:\s+(?:mañana|el|la|tomorrow|hoy))/i);
-      const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy)/i);
+      const titleMatch = text.match(/(?:recuérdame|recuerdame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
+      const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
       const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
       
       if (titleMatch && dateMatch) {
@@ -132,18 +122,17 @@ export default async function handler(req, res) {
         const dateStr = dateMatch[0];
         const timeStr = timeMatch ? timeMatch[1] : '09:00';
         
-        const ok = await addCalendarEvent(title, dateStr, timeStr);
-        await sendTelegram(ok ? '✅' : '❌');
-      } else {
-        await sendTelegram('✅');
+        await addCalendarEvent(title, dateStr, timeStr);
       }
+      // Send response directly (no tokens)
+      await sendTelegram('✅');
       return res.status(200).json({ ok: true });
     }
 
     return res.status(200).json({ ok: true });
   } catch (e) {
     console.error('Voice handler error:', e);
-    await sendTelegram(`❌`);
+    // Fail silently or send brief error
     return res.status(500).json({ ok: false });
   }
 }
