@@ -112,12 +112,34 @@ export default async function handler(req, res) {
         const text = await transcribeAudio(audioBuffer);
         const lowerText = text.toLowerCase();
 
-        // For voice: just log it, the Mac will process via cron
-        if (lowerText.includes('agéndame') || lowerText.includes('agendame') ||
-            lowerText.includes('recuérdame') || lowerText.includes('recuerdame')) {
-          // Mac's voice-processor.js will handle this
-          // Just log for debugging
-          console.log('Voice command detected:', text);
+        // Execute silently (no response sent)
+        if (lowerText.includes('agéndame') || lowerText.includes('agendame')) {
+          const titleMatch = text.match(/(?:agéndame|agendame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
+          const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
+          const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
+          
+          if (titleMatch && dateMatch) {
+            const title = titleMatch[1].trim();
+            const dateStr = dateMatch[0];
+            const timeStr = timeMatch ? timeMatch[1] : '10:00';
+            
+            await addCalendarEvent(title, dateStr, timeStr);
+            // Silent success
+          }
+          
+        } else if (lowerText.includes('recuérdame') || lowerText.includes('recuerdame')) {
+          const titleMatch = text.match(/(?:recuérdame|recuerdame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
+          const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
+          const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
+          
+          if (titleMatch && dateMatch) {
+            const title = `📌 ${titleMatch[1].trim()}`;
+            const dateStr = dateMatch[0];
+            const timeStr = timeMatch ? timeMatch[1] : '09:00';
+            
+            await addCalendarEvent(title, dateStr, timeStr);
+            // Silent success
+          }
         }
       } catch (e) {
         console.error('Background error:', e);
