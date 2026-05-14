@@ -80,59 +80,63 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // Download audio
-    const fileId = message.voice.file_id;
-    const getFileUrl = `https://api.telegram.org/bot${TOKEN}/getFile?file_id=${fileId}`;
-    const fileRes = await fetch(getFileUrl);
-    const fileData = await fileRes.json();
-    const filePath = fileData.result.file_path;
-    const downloadUrl = `https://api.telegram.org/file/bot${TOKEN}/${filePath}`;
+    // Respond immediately (no await) to avoid long responses
+    res.status(200).json({ ok: true });
 
-    const audioRes = await fetch(downloadUrl);
-    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+    // Process in background (fire and forget)
+    (async () => {
+      try {
+        // Download audio
+        const fileId = message.voice.file_id;
+        const getFileUrl = `https://api.telegram.org/bot${TOKEN}/getFile?file_id=${fileId}`;
+        const fileRes = await fetch(getFileUrl);
+        const fileData = await fileRes.json();
+        const filePath = fileData.result.file_path;
+        const downloadUrl = `https://api.telegram.org/file/bot${TOKEN}/${filePath}`;
 
-    // Transcribe (this is the ONLY cost: ~$0.003)
-    const text = await transcribeAudio(audioBuffer);
-    const lowerText = text.toLowerCase();
+        const audioRes = await fetch(downloadUrl);
+        const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
 
-    // Execute and send response directly (no Karen processing)
-    if (lowerText.includes('agéndame') || lowerText.includes('agendame')) {
-      const titleMatch = text.match(/(?:agéndame|agendame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
-      const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
-      const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
-      
-      if (titleMatch && dateMatch) {
-        const title = titleMatch[1].trim();
-        const dateStr = dateMatch[0];
-        const timeStr = timeMatch ? timeMatch[1] : '10:00';
-        
-        await addCalendarEvent(title, dateStr, timeStr);
+        // Transcribe (this is the ONLY cost: ~$0.003)
+        const text = await transcribeAudio(audioBuffer);
+        const lowerText = text.toLowerCase();
+
+        // Execute silently (no response sent)
+        if (lowerText.includes('agéndame') || lowerText.includes('agendame')) {
+          const titleMatch = text.match(/(?:agéndame|agendame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
+          const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
+          const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
+          
+          if (titleMatch && dateMatch) {
+            const title = titleMatch[1].trim();
+            const dateStr = dateMatch[0];
+            const timeStr = timeMatch ? timeMatch[1] : '10:00';
+            
+            await addCalendarEvent(title, dateStr, timeStr);
+            // Silent success
+          }
+          
+        } else if (lowerText.includes('recuérdame') || lowerText.includes('recuerdame')) {
+          const titleMatch = text.match(/(?:recuérdame|recuerdame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
+          const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
+          const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
+          
+          if (titleMatch && dateMatch) {
+            const title = `📌 ${titleMatch[1].trim()}`;
+            const dateStr = dateMatch[0];
+            const timeStr = timeMatch ? timeMatch[1] : '09:00';
+            
+            await addCalendarEvent(title, dateStr, timeStr);
+            // Silent success
+          }
+        }
+      } catch (e) {
+        console.error('Background error:', e);
+        // Fail silently
       }
-      // Send response directly (no tokens)
-      await sendTelegram('✅');
-      return res.status(200).json({ ok: true });
-      
-    } else if (lowerText.includes('recuérdame') || lowerText.includes('recuerdame')) {
-      const titleMatch = text.match(/(?:recuérdame|recuerdame)\s+(.+?)(?:\s+(?:mañana|el\s+\w+|tomorrow|hoy|pasado))/i);
-      const dateMatch = text.match(/(?:mañana|el\s+\w+|tomorrow|hoy|pasado\s+mañana)/i);
-      const timeMatch = text.match(/(?:\s+a\s+las?|at)\s+(.+?)(?:\s+[ap]\.?m\.?|$)/i);
-      
-      if (titleMatch && dateMatch) {
-        const title = `📌 ${titleMatch[1].trim()}`;
-        const dateStr = dateMatch[0];
-        const timeStr = timeMatch ? timeMatch[1] : '09:00';
-        
-        await addCalendarEvent(title, dateStr, timeStr);
-      }
-      // Send response directly (no tokens)
-      await sendTelegram('✅');
-      return res.status(200).json({ ok: true });
-    }
-
-    return res.status(200).json({ ok: true });
+    })();
   } catch (e) {
     console.error('Voice handler error:', e);
-    // Fail silently or send brief error
     return res.status(500).json({ ok: false });
   }
 }
